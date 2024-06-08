@@ -1,15 +1,11 @@
 using System.Collections;
-
+using System.Collections.Generic;
 using System.IO;
 using System.IO.Pipes;
 using System.Linq;
 using System.Text;
 using System.Threading;
 using UnityEngine;
-
-/* Currently very messy because both the server code and hand-drawn code is all in the same file here.
- * But it is still fairly straightforward to use as a reference/base.
- */
 
 public class PipeServer : MonoBehaviour
 {
@@ -23,6 +19,15 @@ public class PipeServer : MonoBehaviour
     public float landmarkScale = 1f;
     public float maxSpeed = 50f;
     public int samplesForPose = 1;
+
+    // pengujian stabilitas
+    public bool isTestingStability = false;
+    public float testDuration = 10f;
+    private float endTime;
+    private float startTime;
+    private float lastLogTime = 0f;
+    //  menyimpan data frame
+    private List<Dictionary<string, float>> frameData = new List<Dictionary<string, float>>(); 
 
     private Body body;
     private NamedPipeServerStream server;
@@ -43,13 +48,12 @@ public class PipeServer : MonoBehaviour
     {
         public Vector3 value;
         public int accumulatedValuesCount;
-        public AccumulatedBuffer(Vector3 v,int ac)
+        public AccumulatedBuffer(Vector3 v, int ac)
         {
             value = v;
             accumulatedValuesCount = ac;
         }
     }
-
     public class Body 
     {
         public Transform parent;
@@ -191,16 +195,47 @@ public class PipeServer : MonoBehaviour
     {
         System.Globalization.CultureInfo.DefaultThreadCurrentCulture = System.Globalization.CultureInfo.InvariantCulture;
 
-        body = new Body(parent,landmarkPrefab,linePrefab,landmarkScale,enableHead?headPrefab:null);
+        body = new Body(parent, landmarkPrefab, linePrefab, landmarkScale, enableHead ? headPrefab : null);
 
         Thread t = new Thread(new ThreadStart(Run));
         t.Start();
 
+        StartCoroutine(StartStabilityTestAfterDelay(2f));
     }
+
     private void Update()
     {
         UpdateBody(body);
+
+        if (isTestingStability && Time.time >= endTime)
+        {
+            StopStabilityTest();
+        }
     }
+
+    private IEnumerator StartStabilityTestAfterDelay(float delay)
+    {
+        yield return new WaitForSeconds(delay);
+        StartStabilityTest();
+    }
+
+    void StartStabilityTest()
+    {
+        isTestingStability = true;
+        startTime = Time.time;
+        endTime = Time.time + testDuration;
+        frameData.Clear(); // Bersihkan data lama
+        Debug.Log("Pengujian stabilitas dimulai.");
+    }
+
+    void StopStabilityTest()
+    {
+        isTestingStability = false;
+        WriteDataToCSV();
+        Debug.Log("Pengujian stabilitas berakhir. Data disimpan di: " + Application.dataPath + "/stability_test.csv");
+    }
+
+
     private void UpdateBody(Body b)
     {
         if (b.active == false) return;
@@ -232,11 +267,50 @@ public class PipeServer : MonoBehaviour
 
         if (b.head)
         {
-            // Experimental method and getting the head pose.
             b.head.transform.position = b.virtualHeadPosition+Vector3.up* .5f;
             Vector3 n1 = Vector3.Scale(new Vector3(.1f, 1f, .1f), GetNormal(b.Position((Landmark)0), b.Position((Landmark)8), b.Position((Landmark)7))).normalized;
             Vector3 n2 = Vector3.Scale(new Vector3(1f, .1f, 1f), GetNormal(b.Position((Landmark)0), b.Position((Landmark)4), b.Position((Landmark)1))).normalized;
             b.head.transform.rotation = Quaternion.LookRotation(-n2, n1);
+        }
+
+        if (isTestingStability && Time.time - lastLogTime >= 0.1f)
+        {
+            Dictionary<string, float> currentFrame = new Dictionary<string, float>();
+            currentFrame["Time"] = Time.time - startTime;
+
+            for (int i = 0; i < LANDMARK_COUNT; ++i)
+            {
+                Vector3 pos = b.instances[i].transform.position;
+                currentFrame[$"Landmark_{i}_x"] = pos.x;
+                currentFrame[$"Landmark_{i}_y"] = pos.y;
+                currentFrame[$"Landmark_{i}_z"] = pos.z;
+            }
+
+            frameData.Add(currentFrame);
+            lastLogTime = Time.time;
+        }
+    }
+
+    void WriteDataToCSV()
+    {
+        string filePath = Application.dataPath + "/stability_test.csv";
+
+        // Membuat header CSV
+        string header = "Time";
+        for (int i = 0; i < LANDMARK_COUNT; i++)
+        {
+            header += $",Landmark_{i}_x,Landmark_{i}_y,Landmark_{i}_z";
+        }
+
+        // Menulis data ke file
+        using (StreamWriter writer = new StreamWriter(filePath))
+        {
+            writer.WriteLine(header);
+            foreach (var frame in frameData)
+            {
+                string line = string.Join(",", frame.Values);
+                writer.WriteLine(line);
+            }
         }
     }
 
@@ -244,7 +318,6 @@ public class PipeServer : MonoBehaviour
     {
         System.Globalization.CultureInfo.CurrentCulture = System.Globalization.CultureInfo.InvariantCulture;
 
-        // Open the named pipe.
         server = new NamedPipeServerStream("UnityMediaPipeBody",PipeDirection.InOut, 99, PipeTransmissionMode.Message);
 
         print("Waiting for connection...");
@@ -282,7 +355,7 @@ public class PipeServer : MonoBehaviour
             }
             catch (EndOfStreamException)
             {
-                break;                    // When client disconnects
+                break;
             }
         }
 
