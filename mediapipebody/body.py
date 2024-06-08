@@ -1,10 +1,8 @@
-# MediaPipe Body
 import mediapipe
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 import csv
 import numpy as np
-
 import cv2
 import threading
 import time
@@ -105,7 +103,7 @@ class BodyThread(threading.Thread):
                 self.processing_latency = (time.perf_counter() - start_time) * 1000
 
                 if global_vars.DEBUG:
-                    if time.time() - self.timeSincePostStatistics >= 0.1:  # Ubah menjadi 0.1 detik (100 ms)
+                    if time.time() - self.timeSincePostStatistics >= 0.1:  #(100 ms)
                         print("Instaneous FPS: %f" % (1 / (self.processing_latency / 1000)))
                         print(f"Capture Latency: {capture.latency:.2f} ms")
                         print(f"Processing Latency: {self.processing_latency:.2f} ms")
@@ -187,7 +185,7 @@ class BodyThread(threading.Thread):
 
                             # Hitung dan kirim jumlah landmark yang terlihat dan confidence score rata-rata
                             visible_landmarks = [
-                                landmark for landmark in results_pose.pose_world_landmarks.landmark if landmark.visibility > 0.8
+                                landmark for landmark in results_pose.pose_world_landmarks.landmark if landmark.visibility >= 1
                             ]
                             visible_landmark_count = len(visible_landmarks)
                             average_confidence = (
